@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Azure Real-time Speech to Text</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, sans-serif;
+    background: #0f1117;
+    color: #e1e4e8;
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    padding: 2rem 1rem;
+  }
+
+  .container {
+    width: 100%;
+    max-width: 720px;
+  }
+
+  h1 {
+    font-size: 1.5rem;
+    font-weight: 600;
+    margin-bottom: 1.5rem;
+    color: #f0f2f5;
+  }
+
+  .status-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+    padding: 0.6rem 1rem;
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 10px;
+    font-size: 0.8rem;
+  }
+
+  .status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #484f58;
+    flex-shrink: 0;
+    transition: background 0.3s;
+  }
+  .status-dot.connecting { background: #d29922; }
+  .status-dot.connected  { background: #3fb950; }
+  .status-dot.recording  { background: #f85149; animation: pulse 1.2s infinite; }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+
+  .status-text { flex: 1; color: #8b949e; }
+  .region-badge {
+    font-size: 0.75rem;
+    padding: 0.2rem 0.5rem;
+    background: #21262d;
+    border-radius: 6px;
+    color: #8b949e;
+  }
+
+  .controls {
+    display: flex;
+    gap: 0.75rem;
+    margin-bottom: 1.25rem;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  button {
+    padding: 0.65rem 1.5rem;
+    border: none;
+    border-radius: 10px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.2s, transform 0.1s;
+  }
+  button:active { transform: scale(0.97); }
+  button:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+    transform: none;
+  }
+
+  .btn-start { background: #238636; color: #fff; }
+  .btn-stop  { background: #da3633; color: #fff; }
+  .btn-copy  { background: #30363d; color: #e1e4e8; margin-left: auto; }
+  .btn-clear { background: #30363d; color: #e1e4e8; }
+
+  .lang-badge {
+    padding: 0.5rem 0.75rem;
+    border: 1px solid #30363d;
+    border-radius: 10px;
+    background: #21262d;
+    color: #8b949e;
+    font-size: 0.8rem;
+    font-weight: 500;
+    letter-spacing: 0.5px;
+  }
+
+  .transcript-section {
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 12px;
+    padding: 1.25rem;
+    min-height: 200px;
+    max-height: 60vh;
+    overflow-y: auto;
+  }
+
+  .transcript-section::-webkit-scrollbar { width: 6px; }
+  .transcript-section::-webkit-scrollbar-track { background: transparent; }
+  .transcript-section::-webkit-scrollbar-thumb { background: #30363d; border-radius: 3px; }
+
+  .transcript-committed {
+    font-size: 0.95rem;
+    line-height: 1.7;
+    color: #e1e4e8;
+  }
+
+  .transcript-partial {
+    font-size: 0.95rem;
+    line-height: 1.7;
+    color: #6e7681;
+    font-style: italic;
+  }
+
+  .lang-tag {
+    display: inline-block;
+    font-size: 0.65rem;
+    font-weight: 700;
+    padding: 0.1rem 0.35rem;
+    margin-right: 0.15rem;
+    background: #30363d;
+    color: #58a6ff;
+    border-radius: 4px;
+    vertical-align: middle;
+    letter-spacing: 0.5px;
+  }
+
+  .transcript-placeholder {
+    color: #484f58;
+    font-size: 0.9rem;
+    text-align: center;
+    padding: 3rem 0;
+  }
+</style>
+</head>
+<body>
+
+<div class="container">
+  <h1>Azure Real-time Speech to Text</h1>
+
+  <div class="status-bar">
+    <div class="status-dot" id="statusDot"></div>
+    <span class="status-text" id="statusText">Disconnected</span>
+    <span class="region-badge" id="latencyBadge">Latency: --</span>
+    <span class="region-badge" id="regionBadge">Region: --</span>
+  </div>
+
+  <div class="controls">
+    <button class="btn-start" id="btnStart">Start Recording</button>
+    <button class="btn-stop" id="btnStop" disabled>Stop</button>
+    <span class="lang-badge">EN / MS / ZH / TA</span>
+    <button class="btn-clear" id="btnClear">Clear</button>
+    <button class="btn-copy" id="btnCopy">Copy</button>
+  </div>
+
+  <div class="transcript-section" id="transcriptSection">
+    <div class="transcript-placeholder" id="placeholder">Transcription will appear here...</div>
+    <div class="transcript-committed" id="committedText"></div>
+    <div class="transcript-partial" id="partialText"></div>
+  </div>
+</div>
+
+<script src="https://aka.ms/csspeech/jsbrowserpackageraw"></script>
+<script>
+const $ = (sel) => document.querySelector(sel);
+
+const btnStart    = $('#btnStart');
+const btnStop     = $('#btnStop');
+const btnCopy     = $('#btnCopy');
+const btnClear    = $('#btnClear');
+const statusDot   = $('#statusDot');
+const statusText  = $('#statusText');
+const latencyBadge = $('#latencyBadge');
+const regionBadge = $('#regionBadge');
+const committedEl = $('#committedText');
+const partialEl   = $('#partialText');
+const placeholder = $('#placeholder');
+const transcriptSection = $('#transcriptSection');
+
+const AUTO_DETECT_LANGUAGES = ['en-SG', 'ms-MY', 'zh-CN', 'ta-IN'];
+
+let recognizer = null;
+let committedTranscripts = [];
+let sessionStartedAt = 0;
+let latencySamples = [];
+
+function setStatus(state, text) {
+  statusDot.className = 'status-dot ' + state;
+  statusText.textContent = text;
+}
+
+function updateTranscriptUI() {
+  const hasContent = committedTranscripts.length > 0 || partialEl.textContent;
+  placeholder.style.display = hasContent ? 'none' : 'block';
+  committedEl.innerHTML = committedTranscripts.map(
+    (t) => `<span class="lang-tag">${t.lang}</span> ${escapeHtml(t.text)}`
+  ).join(' ');
+  transcriptSection.scrollTop = transcriptSection.scrollHeight;
+}
+
+function escapeHtml(str) {
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+async function getToken() {
+  const resp = await fetch('/api/token');
+  if (!resp.ok) throw new Error('Token fetch failed');
+  return resp.json();
+}
+
+async function startRecording() {
+  btnStart.disabled = true;
+  btnStop.disabled = false;
+  setStatus('connecting', 'Fetching token...');
+
+  try {
+    const { token, region } = await getToken();
+    regionBadge.textContent = 'Region: ' + region;
+
+    setStatus('connecting', 'Initializing...');
+
+    const SpeechSDK = window.SpeechSDK;
+    const speechConfig = SpeechSDK.SpeechConfig.fromAuthorizationToken(token, region);
+    const autoDetectConfig = SpeechSDK.AutoDetectSourceLanguageConfig.fromLanguages(AUTO_DETECT_LANGUAGES);
+    const audioConfig = SpeechSDK.AudioConfig.fromDefaultMicrophoneInput();
+    recognizer = SpeechSDK.SpeechRecognizer.FromConfig(speechConfig, autoDetectConfig, audioConfig);
+
+    recognizer.recognizing = (s, e) => {
+      if (e.result.reason === SpeechSDK.ResultReason.RecognizingSpeech) {
+        partialEl.textContent = e.result.text;
+        updateTranscriptUI();
+      }
+    };
+
+    recognizer.recognized = (s, e) => {
+      if (e.result.reason === SpeechSDK.ResultReason.RecognizedSpeech && e.result.text) {
+        if (sessionStartedAt > 0) {
+          const now = performance.now();
+          const offsetTicks = e.result.offset;
+          const durationTicks = e.result.duration;
+          const speechEndMs = (offsetTicks + durationTicks) / 10000;
+          const speechEndWall = sessionStartedAt + speechEndMs;
+          const latency = Math.round(now - speechEndWall);
+          latencySamples.push(latency);
+          if (latencySamples.length > 10) latencySamples.shift();
+          const avg = Math.round(latencySamples.reduce((a, b) => a + b, 0) / latencySamples.length);
+          latencyBadge.textContent = 'Latency: ' + avg + 'ms';
+        }
+
+        const langResult = SpeechSDK.AutoDetectSourceLanguageResult.fromResult(e.result);
+        const lang = langResult.language || '??';
+        const tag = lang.split('-')[0].toUpperCase();
+        committedTranscripts.push({ text: e.result.text, lang: tag });
+        partialEl.textContent = '';
+        updateTranscriptUI();
+      }
+    };
+
+    recognizer.canceled = (s, e) => {
+      if (e.reason === SpeechSDK.CancellationReason.Error) {
+        console.error('Recognition error:', e.errorCode, e.errorDetails);
+        setStatus('', 'Error: ' + e.errorDetails);
+      }
+      stopRecording();
+    };
+
+    recognizer.sessionStarted = () => {
+      sessionStartedAt = performance.now();
+      setStatus('recording', 'Recording — speak now');
+    };
+
+    recognizer.sessionStopped = () => {
+      stopRecording();
+    };
+
+    recognizer.startContinuousRecognitionAsync(
+      () => {},
+      (err) => {
+        console.error('Start failed:', err);
+        setStatus('', 'Failed to start recognition');
+        stopRecording();
+      }
+    );
+
+  } catch (err) {
+    console.error(err);
+    setStatus('', 'Failed to connect');
+    stopRecording();
+  }
+}
+
+function stopRecording() {
+  if (recognizer) {
+    recognizer.stopContinuousRecognitionAsync(
+      () => {
+        recognizer.close();
+        recognizer = null;
+      },
+      (err) => {
+        console.error('Stop error:', err);
+        recognizer.close();
+        recognizer = null;
+      }
+    );
+  }
+  partialEl.textContent = '';
+  sessionStartedAt = 0;
+  latencySamples = [];
+  latencyBadge.textContent = 'Latency: --';
+  setStatus('', 'Disconnected');
+  btnStart.disabled = false;
+  btnStop.disabled = true;
+}
+
+btnStart.addEventListener('click', startRecording);
+btnStop.addEventListener('click', stopRecording);
+
+btnCopy.addEventListener('click', () => {
+  const text = committedTranscripts.map(t => t.text).join(' ');
+  if (!text) return;
+  navigator.clipboard.writeText(text).then(() => {
+    btnCopy.textContent = 'Copied!';
+    setTimeout(() => { btnCopy.textContent = 'Copy'; }, 1500);
+  });
+});
+
+btnClear.addEventListener('click', () => {
+  committedTranscripts = [];
+  committedEl.textContent = '';
+  partialEl.textContent = '';
+  placeholder.style.display = 'block';
+});
+</script>
+
+</body>
+</html>
