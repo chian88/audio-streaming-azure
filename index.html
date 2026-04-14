@@ -96,7 +96,7 @@
   .btn-copy  { background: #30363d; color: #e1e4e8; margin-left: auto; }
   .btn-clear { background: #30363d; color: #e1e4e8; }
 
-  .lang-badge {
+  .lang-select {
     padding: 0.5rem 0.75rem;
     border: 1px solid #30363d;
     border-radius: 10px;
@@ -105,7 +105,11 @@
     font-size: 0.8rem;
     font-weight: 500;
     letter-spacing: 0.5px;
+    cursor: pointer;
+    outline: none;
   }
+  .lang-select:focus { border-color: #58a6ff; }
+  .lang-select:disabled { opacity: 0.35; cursor: not-allowed; }
 
   .transcript-section {
     background: #161b22;
@@ -170,7 +174,13 @@
   <div class="controls">
     <button class="btn-start" id="btnStart">Start Recording</button>
     <button class="btn-stop" id="btnStop" disabled>Stop</button>
-    <span class="lang-badge">EN / MS / ZH / TA</span>
+    <select class="lang-select" id="langSelect">
+      <option value="auto">Auto Detect</option>
+      <option value="en-SG">English (SG)</option>
+      <option value="ms-MY">Malay (MY)</option>
+      <option value="zh-CN">Chinese (CN)</option>
+      <option value="ta-IN">Tamil (IN)</option>
+    </select>
     <button class="btn-clear" id="btnClear">Clear</button>
     <button class="btn-copy" id="btnCopy">Copy</button>
   </div>
@@ -198,8 +208,9 @@ const committedEl = $('#committedText');
 const partialEl   = $('#partialText');
 const placeholder = $('#placeholder');
 const transcriptSection = $('#transcriptSection');
+const langSelect = $('#langSelect');
 
-const AUTO_DETECT_LANGUAGES = ['en-SG', 'ms-MY', 'zh-CN', 'ta-IN'];
+const ALL_LANGUAGES = ['en-SG', 'ms-MY', 'zh-CN', 'ta-IN'];
 
 let recognizer = null;
 let committedTranscripts = [];
@@ -233,6 +244,7 @@ async function getToken() {
 async function startRecording() {
   btnStart.disabled = true;
   btnStop.disabled = false;
+  langSelect.disabled = true;
   setStatus('connecting', 'Fetching token...');
 
   try {
@@ -243,11 +255,18 @@ async function startRecording() {
 
     const SpeechSDK = window.SpeechSDK;
     const speechConfig = SpeechSDK.SpeechConfig.fromAuthorizationToken(token, region);
-    const autoDetectConfig = SpeechSDK.AutoDetectSourceLanguageConfig.fromLanguages(AUTO_DETECT_LANGUAGES);
+    const selectedLang = langSelect.value;
     // by default, it is 16k PCM
     // https://learn.microsoft.com/en-us/azure/ai-services/speech-service/how-to-use-audio-input-streams#identify-the-format-of-the-audio-input-stream
     const audioConfig = SpeechSDK.AudioConfig.fromDefaultMicrophoneInput();
-    recognizer = SpeechSDK.SpeechRecognizer.FromConfig(speechConfig, autoDetectConfig, audioConfig);
+ 
+    if (selectedLang === 'auto') {
+      const autoDetectConfig = SpeechSDK.AutoDetectSourceLanguageConfig.fromLanguages(ALL_LANGUAGES);
+      recognizer = SpeechSDK.SpeechRecognizer.FromConfig(speechConfig, autoDetectConfig, audioConfig);
+    } else {
+      speechConfig.speechRecognitionLanguage = selectedLang;
+      recognizer = new SpeechSDK.SpeechRecognizer(speechConfig, audioConfig);
+    }
 
     recognizer.recognizing = (s, e) => {
       if (e.result.reason === SpeechSDK.ResultReason.RecognizingSpeech) {
@@ -271,8 +290,13 @@ async function startRecording() {
           latencyBadge.textContent = 'Latency: ' + avg + 'ms';
         }
 
-        const langResult = SpeechSDK.AutoDetectSourceLanguageResult.fromResult(e.result);
-        const lang = langResult.language || '??';
+        let lang;
+        if (selectedLang === 'auto') {
+          const langResult = SpeechSDK.AutoDetectSourceLanguageResult.fromResult(e.result);
+          lang = langResult.language || '??';
+        } else {
+          lang = selectedLang;
+        }
         const tag = lang.split('-')[0].toUpperCase();
         committedTranscripts.push({ text: e.result.text, lang: tag });
         partialEl.textContent = '';
@@ -334,6 +358,7 @@ function stopRecording() {
   setStatus('', 'Disconnected');
   btnStart.disabled = false;
   btnStop.disabled = true;
+  langSelect.disabled = false;
 }
 
 btnStart.addEventListener('click', startRecording);
