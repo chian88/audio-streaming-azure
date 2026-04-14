@@ -131,13 +131,6 @@
     color: #e1e4e8;
   }
 
-  .transcript-partial {
-    font-size: 0.95rem;
-    line-height: 1.7;
-    color: #6e7681;
-    font-style: italic;
-  }
-
   .lang-tag {
     display: inline-block;
     font-size: 0.65rem;
@@ -188,7 +181,6 @@
   <div class="transcript-section" id="transcriptSection">
     <div class="transcript-placeholder" id="placeholder">Transcription will appear here...</div>
     <div class="transcript-committed" id="committedText"></div>
-    <div class="transcript-partial" id="partialText"></div>
   </div>
 </div>
 
@@ -205,7 +197,6 @@ const statusText  = $('#statusText');
 const latencyBadge = $('#latencyBadge');
 const regionBadge = $('#regionBadge');
 const committedEl = $('#committedText');
-const partialEl   = $('#partialText');
 const placeholder = $('#placeholder');
 const transcriptSection = $('#transcriptSection');
 const langSelect = $('#langSelect');
@@ -223,7 +214,7 @@ function setStatus(state, text) {
 }
 
 function updateTranscriptUI() {
-  const hasContent = committedTranscripts.length > 0 || partialEl.textContent;
+  const hasContent = committedTranscripts.length > 0;
   placeholder.style.display = hasContent ? 'none' : 'block';
   committedEl.innerHTML = committedTranscripts.map(
     (t) => `<span class="lang-tag">${t.lang}</span> ${escapeHtml(t.text)}`
@@ -268,13 +259,6 @@ async function startRecording() {
       recognizer = new SpeechSDK.SpeechRecognizer(speechConfig, audioConfig);
     }
 
-    recognizer.recognizing = (s, e) => {
-      if (e.result.reason === SpeechSDK.ResultReason.RecognizingSpeech) {
-        partialEl.textContent = e.result.text;
-        updateTranscriptUI();
-      }
-    };
-
     recognizer.recognized = (s, e) => {
       if (e.result.reason === SpeechSDK.ResultReason.RecognizedSpeech && e.result.text) {
         if (sessionStartedAt > 0) {
@@ -299,7 +283,6 @@ async function startRecording() {
         }
         const tag = lang.split('-')[0].toUpperCase();
         committedTranscripts.push({ text: e.result.text, lang: tag });
-        partialEl.textContent = '';
         updateTranscriptUI();
       }
     };
@@ -351,7 +334,6 @@ function stopRecording() {
       }
     );
   }
-  partialEl.textContent = '';
   sessionStartedAt = 0;
   latencySamples = [];
   latencyBadge.textContent = 'Latency: --';
@@ -376,7 +358,6 @@ btnCopy.addEventListener('click', () => {
 btnClear.addEventListener('click', () => {
   committedTranscripts = [];
   committedEl.textContent = '';
-  partialEl.textContent = '';
   placeholder.style.display = 'block';
 });
 </script>
